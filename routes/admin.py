@@ -4,17 +4,27 @@ from services.admin_service import AdminService
 from config import Config
 import secrets
 
+import jwt
+import datetime
+
 admin_bp = Blueprint('admin', __name__)
 
-# Simple in-memory session store. NOTE: This is not persistent and will be lost on server restart.
-# For production, a persistent session store (e.g., Redis, database) should be used.
-active_sessions = set()
+def generate_token():
+    payload = {
+        'sub': 'admin',
+        'iat': datetime.datetime.utcnow(),
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
+    }
+    return jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
 
-def generate_session_token():
-    return secrets.token_urlsafe(32)
-
-def validate_session(token):
-    return token in active_sessions
+def validate_token(token):
+    try:
+        jwt.decode(token, Config.SECRET_KEY, algorithms=['HS256'])
+        return True
+    except jwt.ExpiredSignatureError:
+        return False
+    except jwt.InvalidTokenError:
+        return False
 
 @admin_bp.before_request
 def require_auth():
@@ -28,7 +38,7 @@ def require_auth():
         return jsonify({'message': 'Authorization header missing or invalid'}), 401
     
     token = auth_header[7:]
-    if not validate_session(token):
+    if not validate_token(token):
         return jsonify({'message': '無效或過期的 session，請重新登入'}), 401
 
 @admin_bp.route('/admin/login', methods=['POST'])
@@ -37,8 +47,7 @@ def login():
     password = data.get('password', '')
     
     if password == Config.ADMIN_PASSWORD:
-        token = generate_session_token()
-        active_sessions.add(token)
+        token = generate_token()
         return jsonify({'message': '登入成功', 'token': token})
     else:
         return jsonify({'message': '密碼錯誤'}), 401
