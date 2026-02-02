@@ -14,9 +14,10 @@ RUN chmod +x start.sh
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 
 # Expose the port
-EXPOSE 3000
+EXPOSE 8080
 
 # Run with start script
 CMD ["./start.sh"]

@@ -6,4 +6,4 @@ python -c "from database import init_db; init_db()"
 
 # Start the application
 echo "Starting application..."
-exec gunicorn -w 4 -b 0.0.0.0:3000 app:app
+exec gunicorn -w 4 -b 0.0.0.0:${PORT:-8080} app:app
