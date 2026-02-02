@@ -107,10 +107,9 @@ def init_db():
 
         # Migration: Add is_paid column
         try:
-            conn.run("ALTER TABLE registrations ADD COLUMN is_paid BOOLEAN DEFAULT FALSE")
-        except pg8000.native.DatabaseError as e:
-            if '42701' not in str(e): 
-                pass
+            conn.run("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
+        except Exception:
+            pass
         
         # Registration-Courses junction table (many-to-many)
         conn.run('''CREATE TABLE IF NOT EXISTS registration_courses (
