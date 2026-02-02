@@ -25,13 +25,19 @@ def after_request(response):
 
 @app.route('/favicon.ico')
 def favicon():
-    return send_from_directory(os.path.join(app.root_path, 'static'),
-                               'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    try:
+        return send_from_directory(os.path.join(app.root_path, 'static'),
+                                   'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    except Exception:
+        return '', 204
 
 # Route for xlsx library (backward compatibility or update html)
 @app.route('/xlsx.full.min.js')
 def xlsx_lib():
-    return send_from_directory(os.path.join(app.root_path, 'static', 'js'), 'lib_xlsx.full.min.js')
+    try:
+        return send_from_directory(os.path.join(app.root_path, 'static', 'js'), 'lib_xlsx.full.min.js')
+    except Exception:
+        return '', 204
 
 if __name__ == '__main__':
     print(f"Flask Server running at http://localhost:{Config.PORT}/")
