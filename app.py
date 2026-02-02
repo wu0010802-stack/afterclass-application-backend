@@ -2,6 +2,7 @@
 from flask import Flask, send_from_directory, request
 from config import Config
 from flask_cors import CORS
+from database import init_db
 
 from routes.main import main_bp
 from routes.admin import admin_bp
