@@ -12,7 +12,13 @@ def get_db_connection():
                                       host=urllib.parse.urlparse(db_url).hostname,
                                       port=urllib.parse.urlparse(db_url).port or 5432,
                                       database=urllib.parse.urlparse(db_url).path[1:])
-    return pg8000.native.Connection(user=Config.DB_USER, database=Config.DB_NAME)
+    return pg8000.native.Connection(
+        user=Config.DB_USER, 
+        password=Config.DB_PASSWORD,
+        host=Config.DB_HOST,
+        port=Config.DB_PORT,
+        database=Config.DB_NAME
+    )
 
 def init_db():
     """Initialize database with normalized schema"""
