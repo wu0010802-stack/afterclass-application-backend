@@ -1,7 +1,7 @@
 
 from flask import Flask, send_from_directory
 from config import Config
-from database import init_db
+
 from routes.main import main_bp
 from routes.admin import admin_bp
 import os
@@ -14,7 +14,7 @@ app.register_blueprint(main_bp)
 app.register_blueprint(admin_bp)
 
 # Initialize Database
-init_db()
+
 
 @app.after_request
 def after_request(response):

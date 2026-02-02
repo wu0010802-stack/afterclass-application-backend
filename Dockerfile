@@ -9,11 +9,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
 # Expose the port
 EXPOSE 3000
 
-# Run with gunicorn
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:3000", "app:app"]
+# Run with start script
+CMD ["./start.sh"]
