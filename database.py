@@ -8,15 +8,35 @@ from config import Config
 def get_db_connection():
     db_url = Config.DATABASE_URL
     if db_url:
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
-        return pg8000.native.Connection(user=urllib.parse.urlparse(db_url).username, 
-                                      password=urllib.parse.urlparse(db_url).password,
-                                      host=urllib.parse.urlparse(db_url).hostname,
-                                      port=urllib.parse.urlparse(db_url).port or 5432,
-                                      database=urllib.parse.urlparse(db_url).path[1:],
-                                      ssl_context=ssl_context)
+        url = urllib.parse.urlparse(db_url)
+        user = url.username
+        password = url.password
+        host = url.hostname
+        port = url.port or 5432
+        database = url.path[1:]
+
+        try:
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            return pg8000.native.Connection(
+                user=user, 
+                password=password, 
+                host=host, 
+                port=port, 
+                database=database, 
+                ssl_context=ssl_context
+            )
+        except Exception as e:
+            print(f"SSL connection failed ({e}), retrying without SSL...")
+            return pg8000.native.Connection(
+                user=user, 
+                password=password, 
+                host=host, 
+                port=port, 
+                database=database
+            )
+
     return pg8000.native.Connection(
         user=Config.DB_USER, 
         password=Config.DB_PASSWORD,
