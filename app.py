@@ -1,6 +1,7 @@
 
 from flask import Flask, send_from_directory, request
 from config import Config
+from flask_cors import CORS
 
 from routes.main import main_bp
 from routes.admin import admin_bp
@@ -9,29 +10,15 @@ import os
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Enable CORS for all domains on all routes
+CORS(app, resources={r"/*": {"origins": "*"}})
+
 # Register Blueprints
 app.register_blueprint(main_bp)
 app.register_blueprint(admin_bp)
 
 # Initialize Database
-
-
-@app.before_request
-def handle_preflight():
-    if request.method == "OPTIONS":
-        from flask import make_response
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
-        return response
-
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
+init_db()
 
 @app.route('/favicon.ico')
 def favicon():

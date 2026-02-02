@@ -1,3 +1,4 @@
 pg8000
 flask
 gunicorn
+flask-cors
