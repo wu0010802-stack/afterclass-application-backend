@@ -117,20 +117,22 @@ class AdminService:
     def get_courses_stats():
         conn = get_db_connection()
         try:
-            # Only count 'enrolled' students for course usage stats
+            # Stats for enrolled and waitlist
             results = conn.run("""
-                SELECT c.id, c.name, c.price, c.sessions, c.frequency, c.capacity, c.description, c.video_url,
-                       COUNT(CASE WHEN rc.status = 'enrolled' THEN 1 END) as used
+                SELECT c.id, c.name, c.price, c.sessions, c.frequency, c.capacity, c.description, c.video_url, c.allow_waitlist,
+                       COUNT(CASE WHEN rc.status = 'enrolled' THEN 1 END) as used,
+                       COUNT(CASE WHEN rc.status = 'waitlist' THEN 1 END) as waitlist_count
                 FROM courses c
                 LEFT JOIN registration_courses rc ON c.id = rc.course_id
-                GROUP BY c.id, c.name, c.price, c.sessions, c.frequency, c.capacity, c.description, c.video_url
+                GROUP BY c.id, c.name, c.price, c.sessions, c.frequency, c.capacity, c.description, c.video_url, c.allow_waitlist
                 ORDER BY c.id
             """)
             
             courses = []
             for row in results:
                 capacity = row[5] if row[5] is not None else 30
-                used = row[8]
+                used = row[9]
+                waitlist_count = row[10]
                 courses.append({
                     'id': row[0],
                     'name': row[1],
@@ -140,7 +142,9 @@ class AdminService:
                     'capacity': capacity,
                     'description': row[6] or '',
                     'video_url': row[7] or '',
+                    'allow_waitlist': row[8] if row[8] is not None else True,
                     'used': used,
+                    'waitlist_count': waitlist_count,
                     'remaining': max(0, capacity - used)
                 })
             return courses
@@ -184,7 +188,8 @@ class AdminService:
             
             total_amount = 0
             for course in courses:
-                total_amount += int(course['price'])
+                if course['status'] == 'enrolled':
+                    total_amount += int(course['price'])
             
             for supply in supplies:
                 total_amount += int(supply['price'])
@@ -298,15 +303,16 @@ class AdminService:
                 raise ValueError('課程名稱已存在')
 
             result = conn.run(
-                """INSERT INTO courses (name, price, sessions, frequency, description, capacity, video_url) 
-                   VALUES (:name, :price, :sessions, :frequency, :description, :capacity, :video_url) 
+                """INSERT INTO courses (name, price, sessions, frequency, description, capacity, video_url, allow_waitlist) 
+                   VALUES (:name, :price, :sessions, :frequency, :description, :capacity, :video_url, :allow_waitlist) 
                    RETURNING id""",
                 name=name, price=int(price), 
                 sessions=int(data.get('sessions')) if data.get('sessions') else None,
                 frequency=data.get('frequency', ''), 
                 description=data.get('description', ''), 
                 capacity=int(data.get('capacity', 30)),
-                video_url=data.get('video_url', '')
+                video_url=data.get('video_url', ''),
+                allow_waitlist=data.get('allow_waitlist', True)
             )
             return result[0][0]
         finally:
@@ -337,7 +343,7 @@ class AdminService:
                     """UPDATE courses SET 
                        name = :name, price = :price, sessions = :sessions,
                        frequency = :frequency, description = :description, capacity = :capacity,
-                       video_url = :video_url
+                       video_url = :video_url, allow_waitlist = :allow_waitlist
                        WHERE id = :id""",
                     name=name, price=int(price), 
                     sessions=int(data.get('sessions')) if data.get('sessions') else None,
@@ -345,6 +351,7 @@ class AdminService:
                     description=data.get('description', ''), 
                     capacity=int(data.get('capacity', 30)),
                     video_url=data.get('video_url', ''),
+                    allow_waitlist=data.get('allow_waitlist', True),
                     id=course_id
                 )
             else:

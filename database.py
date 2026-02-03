@@ -84,6 +84,10 @@ def init_db():
             conn.run("ALTER TABLE courses ADD COLUMN IF NOT EXISTS video_url TEXT")
         except Exception:
             pass
+        try:
+            conn.run("ALTER TABLE courses ADD COLUMN IF NOT EXISTS allow_waitlist BOOLEAN DEFAULT TRUE")
+        except Exception:
+            pass
         
         # Supplies table
         conn.run('''CREATE TABLE IF NOT EXISTS supplies (

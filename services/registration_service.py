@@ -165,14 +165,17 @@ class RegistrationService:
 
             # Insert courses with capacity check
             waitlisted_courses = []
+            full_error_courses = []
+            
             for course in courses:
                 # Get price for snapshot
-                course_result = conn.run("SELECT id, capacity, price FROM courses WHERE name=:name FOR UPDATE", name=course['name'])
+                course_result = conn.run("SELECT id, capacity, price, allow_waitlist FROM courses WHERE name=:name FOR UPDATE", name=course['name'])
                 
                 if course_result:
                     course_id = course_result[0][0]
                     capacity = course_result[0][1]
                     price_snapshot = course_result[0][2]
+                    allow_waitlist = course_result[0][3] if course_result[0][3] is not None else True
                     status = 'enrolled'
                     
                     if capacity is not None:
@@ -184,8 +187,12 @@ class RegistrationService:
                         current_count = count_result[0][0]
                         
                         if current_count >= capacity:
-                            status = 'waitlist'
-                            waitlisted_courses.append(course['name'])
+                            if allow_waitlist:
+                                status = 'waitlist'
+                                waitlisted_courses.append(course['name'])
+                            else:
+                                full_error_courses.append(course['name'])
+                                raise ValueError(f"課程 {course['name']} 已額滿且不接受候補")
 
                     conn.run(
                         "INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) VALUES (:reg_id, :course_id, :status, :price)",
@@ -224,19 +231,26 @@ class RegistrationService:
         try:
             # Only count ENROLLED students as used
             results = conn.run("""
-                SELECT c.name, c.capacity, COUNT(CASE WHEN rc.status = 'enrolled' THEN 1 END) as used
+                SELECT c.name, c.capacity, c.allow_waitlist, COUNT(CASE WHEN rc.status = 'enrolled' THEN 1 END) as used
                 FROM courses c
                 LEFT JOIN registration_courses rc ON c.id = rc.course_id
-                GROUP BY c.id, c.name, c.capacity
+                GROUP BY c.id, c.name, c.capacity, c.allow_waitlist
             """)
             
             availability = {}
             for row in results:
                 name = row[0]
                 capacity = row[1] if row[1] is not None else 30
-                used = row[2]
+                allow_waitlist = row[2] if row[2] is not None else True
+                used = row[3]
                 remaining = max(0, capacity - used)
-                availability[name] = remaining
+                
+                # If no remaining spots and no waitlist allowed, send specific signal
+                if remaining == 0 and not allow_waitlist:
+                     availability[name] = -1 # -1 indicates FULL and NO WAITLIST
+                else:
+                     availability[name] = remaining
+
             return availability
         finally:
             conn.close()
