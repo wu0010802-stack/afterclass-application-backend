@@ -218,6 +218,16 @@ def toggle_payment(reg_id):
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
+@admin_bp.route('/admin/registration/<int:reg_id>/remark', methods=['PUT'])
+def update_remark(reg_id):
+    try:
+        data = request.get_json()
+        remark = data.get('remark', '')
+        result = AdminService.update_remark(reg_id, remark)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
 @admin_bp.route('/admin/get-async-routes', methods=['GET'])
 def get_async_routes():
     """Endpoint for frontend router initialization. Returns empty list for static routes."""

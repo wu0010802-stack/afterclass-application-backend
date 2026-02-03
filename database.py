@@ -125,6 +125,12 @@ def init_db():
             conn.run("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
         except Exception:
             pass
+
+        # Migration: Add remark column
+        try:
+            conn.run("ALTER TABLE registrations ADD COLUMN IF NOT EXISTS remark TEXT DEFAULT ''")
+        except Exception:
+            pass
         
         # Registration-Courses junction table (many-to-many)
         conn.run('''CREATE TABLE IF NOT EXISTS registration_courses (

@@ -35,7 +35,8 @@ class AdminService:
                         FROM registration_courses rc 
                         JOIN courses c ON rc.course_id = c.id 
                         WHERE rc.registration_id = r.id
-                    ), '') as course_names
+                    ), '') as course_names,
+                    r.remark
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
@@ -54,6 +55,7 @@ class AdminService:
                     'supply_count': row[6],
                     'is_paid': row[7],
                     'course_names': row[8],
+                    'remark': row[9] or '',
                     'type': 'registration',
                     'status': '已報名'
                 })
@@ -163,13 +165,11 @@ class AdminService:
             return courses
         finally:
             conn.close()
-
-    @staticmethod
     def get_registration_detail(reg_id):
         conn = get_db_connection()
         try:
             reg_results = conn.run("""
-                SELECT r.id, s.name, COALESCE(cl.name, r.class_name), r.created_at, r.updated_at, s.birthday, r.is_paid
+                SELECT r.id, s.name, COALESCE(cl.name, r.class_name), r.created_at, r.updated_at, s.birthday, r.is_paid, r.remark
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
@@ -215,10 +215,21 @@ class AdminService:
                 'updated_at': reg[4].isoformat() if reg[4] else None,
                 'birthday': reg[5].strftime('%Y-%m-%d') if reg[5] else None,
                 'is_paid': reg[6],
+                'remark': reg[7] or '',
                 'courses': courses,
                 'supplies': supplies,
                 'total_amount': total_amount
             }
+        finally:
+            conn.close()
+
+    @staticmethod
+    def update_remark(reg_id, remark):
+        conn = get_db_connection()
+        try:
+            conn.run("UPDATE registrations SET remark = :remark, updated_at = :now WHERE id = :id",
+                     remark=remark, now=datetime.now(), id=reg_id)
+            return {'message': 'Remark updated'}
         finally:
             conn.close()
 
