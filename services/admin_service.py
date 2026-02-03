@@ -83,8 +83,8 @@ class AdminService:
             # 1. Course Revenue
             course_rev = conn.run("""
                 SELECT 
-                    SUM(CASE WHEN r.is_paid = 1 THEN c.price ELSE 0 END) as paid,
-                    SUM(CASE WHEN r.is_paid = 0 THEN c.price ELSE 0 END) as unpaid
+                    SUM(CASE WHEN r.is_paid IS TRUE THEN c.price ELSE 0 END) as paid,
+                    SUM(CASE WHEN r.is_paid IS NOT TRUE THEN c.price ELSE 0 END) as unpaid
                 FROM registration_courses rc 
                 JOIN registrations r ON rc.registration_id = r.id
                 JOIN courses c ON rc.course_id = c.id
@@ -94,8 +94,8 @@ class AdminService:
             # 2. Supply Revenue
             supply_rev = conn.run("""
                 SELECT 
-                    SUM(CASE WHEN r.is_paid = 1 THEN s.price ELSE 0 END) as paid,
-                    SUM(CASE WHEN r.is_paid = 0 THEN s.price ELSE 0 END) as unpaid
+                    SUM(CASE WHEN r.is_paid IS TRUE THEN s.price ELSE 0 END) as paid,
+                    SUM(CASE WHEN r.is_paid IS NOT TRUE THEN s.price ELSE 0 END) as unpaid
                 FROM registration_supplies rs
                 JOIN registrations r ON rs.registration_id = r.id
                 JOIN supplies s ON rs.supply_id = s.id
