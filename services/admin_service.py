@@ -256,6 +256,7 @@ class AdminService:
         try:
             conn.run("UPDATE registrations SET remark = :remark, updated_at = :now WHERE id = :id",
                      remark=remark, now=datetime.now(), id=reg_id)
+            conn.run("COMMIT")
             return {'message': 'Remark updated'}
         finally:
             conn.close()
@@ -265,6 +266,7 @@ class AdminService:
         conn = get_db_connection()
         try:
             conn.run("DELETE FROM registrations WHERE id = :id", id=reg_id)
+            conn.run("COMMIT")
         finally:
             conn.close()
 
@@ -317,9 +319,10 @@ class AdminService:
                 rc_id=registration_course_id
             )
             if result is None: # In pg8000, rowcount is not returned, so we check if an error would have been raised
-                # This check is imperfect. A better check would be to SELECT first.
                 # For now, we assume if it didn't error, it worked or did nothing.
+                conn.run("COMMIT")
                 return {"message": "已從候補名單中刪除"}
+            conn.run("COMMIT")
             return {"message": "已從候補名單中刪除"}
         finally:
             conn.close()
@@ -337,6 +340,7 @@ class AdminService:
                 raise ValueError(f'無法刪除：此課程有 {check_result[0][0]} 筆報名記錄，請先刪除相關報名後再試。')
             
             conn.run("DELETE FROM courses WHERE id = :id", id=course_id)
+            conn.run("COMMIT")
         finally:
             conn.close()
 
@@ -365,6 +369,7 @@ class AdminService:
                 video_url=data.get('video_url', ''),
                 allow_waitlist=data.get('allow_waitlist', True)
             )
+            conn.run("COMMIT")
             return result[0][0]
         finally:
             conn.close()
@@ -414,6 +419,7 @@ class AdminService:
                     "UPDATE courses SET capacity = :capacity WHERE id = :id",
                     capacity=int(new_capacity), id=course_id
                 )
+            conn.run("COMMIT")
         finally:
             conn.close()
 
@@ -438,6 +444,7 @@ class AdminService:
                 "INSERT INTO classes (name) VALUES (:name) RETURNING id",
                 name=name
             )
+            conn.run("COMMIT")
             return result[0][0]
         finally:
             conn.close()
@@ -450,7 +457,9 @@ class AdminService:
             if existing:
                 raise ValueError('班級名稱已存在')
             
+            
             conn.run("UPDATE classes SET name = :name WHERE id = :id", name=name, id=class_id)
+            conn.run("COMMIT")
         finally:
             conn.close()
 
@@ -464,6 +473,7 @@ class AdminService:
                 raise ValueError(f'無法刪除：已有 {check[0][0]} 位學生屬於此班級')
                 
             conn.run("DELETE FROM classes WHERE id = :id", id=class_id)
+            conn.run("COMMIT")
         finally:
             conn.close()
 
