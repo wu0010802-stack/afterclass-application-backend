@@ -18,7 +18,20 @@ class AdminService:
                     (SELECT COUNT(*) FROM registration_supplies rs WHERE rs.registration_id = r.id) as supply_count,
                     r.is_paid,
                     COALESCE((
-                        SELECT string_agg(c.name, '、') 
+                        SELECT string_agg(
+                            CASE 
+                                WHEN rc.status = 'waitlist' THEN 
+                                    c.name || ' (候補順位: ' || (
+                                        SELECT COUNT(*) + 1
+                                        FROM registration_courses rc2
+                                        WHERE rc2.course_id = rc.course_id
+                                          AND rc2.status = 'waitlist'
+                                          AND rc2.id < rc.id
+                                    ) || ')'
+                                ELSE c.name 
+                            END, 
+                            '、'
+                        ) 
                         FROM registration_courses rc 
                         JOIN courses c ON rc.course_id = c.id 
                         WHERE rc.registration_id = r.id
