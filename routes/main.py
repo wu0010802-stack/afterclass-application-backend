@@ -16,11 +16,13 @@ def get_courses_public():
 @main_bp.route('/query-registration', methods=['GET'])
 def query_registration():
     name = request.args.get('name')
+    birthday = request.args.get('birthday')
+    
     if not name:
         return jsonify({'message': 'Missing name parameter'}), 400
     
     try:
-        result = RegistrationService.get_registration_by_student(name)
+        result = RegistrationService.get_registration_by_student(name, birthday)
         if result:
             return jsonify(result)
         return jsonify({'message': 'Registration not found'}), 404

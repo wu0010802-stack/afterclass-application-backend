@@ -5,20 +5,31 @@ import json
 
 class RegistrationService:
     @staticmethod
-    def get_registration_by_student(student_name):
+    def get_registration_by_student(student_name, birthday=None):
         conn = get_db_connection()
         try:
             # Get latest registration for student
             # Join with classes table to get class name via ID, fallback to class_name column if ID is null (migration safety)
-            results = conn.run("""
+            query = """
                 SELECT r.id, s.name, COALESCE(cl.name, r.class_name), r.created_at, s.birthday
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
                 WHERE s.name = :name
+            """
+            
+            params = {'name': student_name}
+            
+            if birthday:
+                query += " AND s.birthday = :birthday"
+                params['birthday'] = birthday
+                
+            query += """
                 ORDER BY r.created_at DESC
                 LIMIT 1
-            """, name=student_name)
+            """
+            
+            results = conn.run(query, **params)
             
             if not results:
                 return None
@@ -46,12 +57,12 @@ class RegistrationService:
             
             supplies = [{'name': row[0], 'price': str(row[1])} for row in supply_results]
             
-            birthday = reg[4].strftime('%Y-%m-%d') if reg[4] else ''
+            birthday_str = reg[4].strftime('%Y-%m-%d') if reg[4] else ''
 
             return {
                 'id': reg_id,
                 'name': reg[1],
-                'birthday': birthday,
+                'birthday': birthday_str,
                 'class': reg[2] or 'Unspecified',
                 'courses': courses,
                 'supplies': supplies,
