@@ -68,62 +68,77 @@ class AdminService:
     def get_dashboard_stats():
         conn = get_db_connection()
         try:
-            # This query now fetches individual course registrations (enrollments)
-            # instead of grouping by registration. This gives us a unified list of
-            # all enrolled and waitlisted course attempts.
-            results = conn.run("""
-                SELECT 
-                    r.id as registration_id,
-                    rc.id as registration_course_id,
-                    s.name as student_name,
-                    s.birthday,
-                    COALESCE(cl.name, r.class_name) as class_name,
-                    c.name as course_name,
-                    rc.status,
-                    r.created_at,
-                    r.is_paid
-                FROM registration_courses rc
-                JOIN registrations r ON rc.registration_id = r.id
-                JOIN students s ON r.student_id = s.id
-                JOIN courses c ON rc.course_id = c.id
-                LEFT JOIN classes cl ON r.class_id = cl.id
-                ORDER BY r.created_at DESC
-            """)
-            
-            enrollments = []
-            for row in results:
-                enrollments.append({
-                    'registration_id': row[0],
-                    'registration_course_id': row[1],
-                    'student_name': row[2],
-                    'birthday': row[3].strftime('%Y-%m-%d') if row[3] else None,
-                    'class_name': row[4],
-                    'course_name': row[5],
-                    'status': row[6],
-                    'created_at': row[7].isoformat() if row[7] else None,
-                    'is_paid': row[8]
-                })
-            
-            # Get overall statistics
-            stats_result = conn.run("""
+            # Stats Summary
+            summary_query = """
                 SELECT 
                     (SELECT COUNT(*) FROM registrations) as total_registrations,
                     (SELECT COUNT(*) FROM students) as total_students,
                     (SELECT COUNT(*) FROM registration_courses WHERE status = 'enrolled') as total_enrollments,
+                    (SELECT COUNT(*) FROM registration_courses WHERE status = 'waitlist') as total_waitlist,
                     (SELECT COUNT(*) FROM registration_supplies) as total_supplies
-            """)
+            """
+            summary_res = conn.run(summary_query)[0]
             
-            stats = stats_result[0]
-            statistics = {
-                'totalRegistrations': stats[0],
-                'totalStudents': stats[1],
-                'totalCourseEnrollments': stats[2],
-                'totalSupplyOrders': stats[3]
-            }
+            # Revenue Calculation
+            # 1. Course Revenue
+            course_rev = conn.run("""
+                SELECT 
+                    SUM(CASE WHEN r.is_paid = 1 THEN c.price ELSE 0 END) as paid,
+                    SUM(CASE WHEN r.is_paid = 0 THEN c.price ELSE 0 END) as unpaid
+                FROM registration_courses rc 
+                JOIN registrations r ON rc.registration_id = r.id
+                JOIN courses c ON rc.course_id = c.id
+                WHERE rc.status = 'enrolled'
+            """)[0]
+            
+            # 2. Supply Revenue
+            supply_rev = conn.run("""
+                SELECT 
+                    SUM(CASE WHEN r.is_paid = 1 THEN s.price ELSE 0 END) as paid,
+                    SUM(CASE WHEN r.is_paid = 0 THEN s.price ELSE 0 END) as unpaid
+                FROM registration_supplies rs
+                JOIN registrations r ON rs.registration_id = r.id
+                JOIN supplies s ON rs.supply_id = s.id
+            """)[0]
+            
+            total_revenue = (course_rev[0] or 0) + (supply_rev[0] or 0)
+            total_unpaid = (course_rev[1] or 0) + (supply_rev[1] or 0)
+            
+            # Daily Registrations
+            daily_res = conn.run("""
+                SELECT DATE(created_at) as d, COUNT(*) as c
+                FROM registrations
+                GROUP BY DATE(created_at)
+                ORDER BY DATE(created_at)
+            """)
+            daily_stats = [{'date': row[0], 'count': row[1]} for row in daily_res]
+            
+            # Top Courses
+            top_courses_res = conn.run("""
+                SELECT c.name, COUNT(*) as c
+                FROM registration_courses rc
+                JOIN courses c ON rc.course_id = c.id
+                WHERE rc.status = 'enrolled'
+                GROUP BY c.name
+                ORDER BY c DESC
+                LIMIT 5
+            """)
+            top_courses = [{'name': row[0], 'count': row[1]} for row in top_courses_res]
             
             return {
-                'enrollments': enrollments,
-                'statistics': statistics
+                'statistics': {
+                    'totalRegistrations': summary_res[0],
+                    'totalStudents': summary_res[1],
+                    'totalCourseEnrollments': summary_res[2],
+                    'totalWaitlist': summary_res[3],
+                    'totalSupplyOrders': summary_res[4],
+                    'totalRevenue': total_revenue,
+                    'totalUnpaid': total_unpaid
+                },
+                'charts': {
+                    'daily': daily_stats,
+                    'topCourses': top_courses
+                }
             }
         finally:
             conn.close()
