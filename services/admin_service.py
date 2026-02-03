@@ -490,3 +490,12 @@ class AdminService:
                      paid=paid, now=datetime.now(), id=reg_id)
         finally:
             conn.close()
+
+    @staticmethod
+    def toggle_payment(reg_id, paid):
+        conn = get_db_connection()
+        try:
+            conn.run("UPDATE registrations SET is_paid = :paid, updated_at = :now WHERE id = :id",
+                     paid=paid, now=datetime.now(), id=reg_id)
+        finally:
+            conn.close()
