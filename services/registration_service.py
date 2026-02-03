@@ -74,8 +74,8 @@ class RegistrationService:
     @staticmethod
     def handle_registration(data, update=False):
         # Time Validation
-        # Server time is likely UTC, but user input settings are local time (Taipei +8)
-        current_time = datetime.now() + timedelta(hours=8)
+        # Server time should be used directly. Assuming server is configured to correct timezone or local time matches user intent.
+        current_time = datetime.now()
         settings_res = RegistrationService.get_registration_settings()
         start = settings_res.get('start')
         end = settings_res.get('end')

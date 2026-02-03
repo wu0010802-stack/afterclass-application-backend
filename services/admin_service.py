@@ -479,6 +479,7 @@ class AdminService:
                 "INSERT INTO settings (key, value) VALUES ('registration_end', :value) ON CONFLICT (key) DO UPDATE SET value = :value",
                 value=end
             )
+            conn.run("COMMIT")
         finally:
             conn.close()
 
@@ -488,14 +489,6 @@ class AdminService:
         try:
             conn.run("UPDATE registrations SET is_paid = :paid, updated_at = :now WHERE id = :id",
                      paid=paid, now=datetime.now(), id=reg_id)
-        finally:
-            conn.close()
-
-    @staticmethod
-    def toggle_payment(reg_id, paid):
-        conn = get_db_connection()
-        try:
-            conn.run("UPDATE registrations SET is_paid = :paid, updated_at = :now WHERE id = :id",
-                     paid=paid, now=datetime.now(), id=reg_id)
+            conn.run("COMMIT")
         finally:
             conn.close()
