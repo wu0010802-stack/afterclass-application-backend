@@ -68,6 +68,7 @@ class AdminService:
     def get_dashboard_stats():
         conn = get_db_connection()
         try:
+            current_date = datetime.now().date()
             # Stats Summary
             summary_query = """
                 SELECT 
@@ -75,9 +76,11 @@ class AdminService:
                     (SELECT COUNT(*) FROM students) as total_students,
                     (SELECT COUNT(*) FROM registration_courses WHERE status = 'enrolled') as total_enrollments,
                     (SELECT COUNT(*) FROM registration_courses WHERE status = 'waitlist') as total_waitlist,
-                    (SELECT COUNT(*) FROM registration_supplies) as total_supplies
+                    (SELECT COUNT(*) FROM registration_supplies) as total_supplies,
+                    (SELECT COUNT(*) FROM registrations WHERE DATE(created_at) = :today) as today_new,
+                    (SELECT SUM(capacity) FROM courses) as total_capacity
             """
-            summary_res = conn.run(summary_query)[0]
+            summary_res = conn.run(summary_query, today=current_date)[0]
             
             # Revenue Calculation
             # 1. Course Revenue
@@ -104,6 +107,13 @@ class AdminService:
             total_revenue = (course_rev[0] or 0) + (supply_rev[0] or 0)
             total_unpaid = (course_rev[1] or 0) + (supply_rev[1] or 0)
             
+            # Calculate Enrollment Rate
+            total_enrollments = summary_res[2]
+            total_capacity = summary_res[6]
+            enrollment_rate = 0
+            if total_capacity and total_capacity > 0:
+                enrollment_rate = round((total_enrollments / total_capacity) * 100, 1)
+
             # Daily Registrations
             daily_res = conn.run("""
                 SELECT DATE(created_at) as d, COUNT(*) as c
@@ -132,8 +142,10 @@ class AdminService:
                     'totalCourseEnrollments': summary_res[2],
                     'totalWaitlist': summary_res[3],
                     'totalSupplyOrders': summary_res[4],
+                    'todayNewRegistrations': summary_res[5],
                     'totalRevenue': total_revenue,
-                    'totalUnpaid': total_unpaid
+                    'totalUnpaid': total_unpaid,
+                    'enrollmentRate': enrollment_rate
                 },
                 'charts': {
                     'daily': daily_stats,
