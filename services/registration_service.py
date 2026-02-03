@@ -73,6 +73,28 @@ class RegistrationService:
 
     @staticmethod
     def handle_registration(data, update=False):
+        # Time Validation
+        current_time = datetime.now()
+        settings_res = RegistrationService.get_registration_settings()
+        start = settings_res.get('start')
+        end = settings_res.get('end')
+
+        if start:
+            try:
+                start_dt = datetime.fromisoformat(start)
+                if current_time < start_dt:
+                    raise ValueError(f"報名尚未開始 (開放時間: {start})")
+            except ValueError:
+                pass # Ignore invalid date format in settings
+
+        if end:
+            try:
+                end_dt = datetime.fromisoformat(end)
+                if current_time > end_dt:
+                    raise ValueError(f"報名已截止 (截止時間: {end})")
+            except ValueError:
+                pass
+
         name = data.get('name')
         birthday = data.get('birthday')  # Format: YYYY-MM-DD
         class_name = data.get('class')
@@ -127,7 +149,7 @@ class RegistrationService:
                 conn.run("DELETE FROM registration_courses WHERE registration_id=:id", id=reg_id)
                 conn.run("DELETE FROM registration_supplies WHERE registration_id=:id", id=reg_id)
                 new_id = reg_id
-                message = 'Update successful!'
+                message = '更新成功！'
             else:
                 # Insert or get student
                 # 3NF Optimization: Identify student by Name + Birthday
@@ -161,7 +183,7 @@ class RegistrationService:
                     student_id=student_id, class_name=class_name, class_id=class_id, now=current_time
                 )
                 new_id = reg_result[0][0]
-                message = 'Registration successful!'
+                message = '報名成功！'
 
             # Insert courses with capacity check
             waitlisted_courses = []
