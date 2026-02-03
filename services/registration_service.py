@@ -1,6 +1,6 @@
 
 from database import get_db_connection
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 class RegistrationService:
@@ -74,7 +74,8 @@ class RegistrationService:
     @staticmethod
     def handle_registration(data, update=False):
         # Time Validation
-        current_time = datetime.now()
+        # Server time is likely UTC, but user input settings are local time (Taipei +8)
+        current_time = datetime.now() + timedelta(hours=8)
         settings_res = RegistrationService.get_registration_settings()
         start = settings_res.get('start')
         end = settings_res.get('end')
