@@ -1,7 +1,14 @@
 
 from database import get_db_connection
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
+
+# Taiwan timezone (UTC+8)
+TW_TZ = timezone(timedelta(hours=8))
+
+def get_taiwan_time():
+    """Get current time in Taiwan timezone"""
+    return datetime.now(TW_TZ)
 
 class RegistrationService:
     @staticmethod
@@ -98,7 +105,7 @@ class RegistrationService:
     def handle_registration(data, update=False):
         # Time Validation
         # Server time should be used directly. Assuming server is configured to correct timezone or local time matches user intent.
-        current_time = datetime.now()
+        current_time = get_taiwan_time()
         settings_res = RegistrationService.get_registration_settings()
         start = settings_res.get('start')
         end = settings_res.get('end')
@@ -138,7 +145,7 @@ class RegistrationService:
         conn = get_db_connection()
         try:
             conn.run("BEGIN")
-            current_time = datetime.now()
+            current_time = get_taiwan_time()
             
             if update:
                 reg_id = data.get('id')

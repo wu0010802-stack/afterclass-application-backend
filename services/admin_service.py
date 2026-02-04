@@ -1,6 +1,13 @@
 
 from database import get_db_connection
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# Taiwan timezone (UTC+8)
+TW_TZ = timezone(timedelta(hours=8))
+
+def get_taiwan_time():
+    """Get current time in Taiwan timezone"""
+    return datetime.now(TW_TZ)
 
 class AdminService:
     @staticmethod
@@ -68,7 +75,7 @@ class AdminService:
     def get_dashboard_stats():
         conn = get_db_connection()
         try:
-            current_date = datetime.now().date()
+            current_date = get_taiwan_time().date()
             # Stats Summary
             summary_query = """
                 SELECT 
@@ -255,7 +262,7 @@ class AdminService:
         conn = get_db_connection()
         try:
             conn.run("UPDATE registrations SET remark = :remark, updated_at = :now WHERE id = :id",
-                     remark=remark, now=datetime.now(), id=reg_id)
+                     remark=remark, now=get_taiwan_time(), id=reg_id)
             conn.run("COMMIT")
             return {'message': 'Remark updated'}
         finally:
@@ -543,7 +550,7 @@ class AdminService:
         conn = get_db_connection()
         try:
             conn.run("UPDATE registrations SET is_paid = :paid, updated_at = :now WHERE id = :id",
-                     paid=paid, now=datetime.now(), id=reg_id)
+                     paid=paid, now=get_taiwan_time(), id=reg_id)
             conn.run("COMMIT")
         finally:
             conn.close()
@@ -586,7 +593,7 @@ class AdminService:
                         class_id = class_res[0][0]
                 
                 conn.run("UPDATE registrations SET class_name = :class_name, class_id = :class_id, updated_at = :now WHERE id = :id",
-                         class_name=class_name, class_id=class_id, now=datetime.now(), id=reg_id)
+                         class_name=class_name, class_id=class_id, now=get_taiwan_time(), id=reg_id)
             
             # Update courses if provided
             if 'courses' in data:
