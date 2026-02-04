@@ -37,15 +37,37 @@ class RegistrationService:
             reg = results[0]
             reg_id = reg[0]
             
-            # Get courses
+            # Get courses with status and waitlist position
             course_results = conn.run("""
-                SELECT c.name, c.price
+                SELECT c.name, c.price, rc.status, rc.id as rc_id, rc.course_id
                 FROM registration_courses rc
                 JOIN courses c ON rc.course_id = c.id
                 WHERE rc.registration_id = :reg_id
             """, reg_id=reg_id)
             
-            courses = [{'name': row[0], 'price': str(row[1])} for row in course_results]
+            courses = []
+            for row in course_results:
+                course_data = {
+                    'name': row[0], 
+                    'price': str(row[1]),
+                    'status': row[2]
+                }
+                
+                # If waitlisted, calculate position
+                if row[2] == 'waitlist':
+                    rc_id = row[3]
+                    course_id = row[4]
+                    # Count how many waitlist entries came before this one
+                    position_result = conn.run("""
+                        SELECT COUNT(*) + 1 
+                        FROM registration_courses 
+                        WHERE course_id = :course_id 
+                          AND status = 'waitlist' 
+                          AND id < :rc_id
+                    """, course_id=course_id, rc_id=rc_id)
+                    course_data['waitlist_position'] = position_result[0][0] if position_result else 1
+                
+                courses.append(course_data)
             
             # Get supplies
             supply_results = conn.run("""
@@ -70,6 +92,7 @@ class RegistrationService:
             }
         finally:
             conn.close()
+
 
     @staticmethod
     def handle_registration(data, update=False):
@@ -188,6 +211,7 @@ class RegistrationService:
 
             # Insert courses with capacity check
             waitlisted_courses = []
+            waitlisted_positions = {}  # Store course_name -> position
             full_error_courses = []
             
             for course in courses:
@@ -212,7 +236,14 @@ class RegistrationService:
                         if current_count >= capacity:
                             if allow_waitlist:
                                 status = 'waitlist'
+                                # Calculate waitlist position (how many are already waitlisted + 1)
+                                waitlist_count = conn.run(
+                                    "SELECT COUNT(*) FROM registration_courses WHERE course_id=:cid AND status='waitlist'",
+                                    cid=course_id
+                                )
+                                position = waitlist_count[0][0] + 1
                                 waitlisted_courses.append(course['name'])
+                                waitlisted_positions[course['name']] = position
                             else:
                                 full_error_courses.append(course['name'])
                                 raise ValueError(f"課程 {course['name']} 已額滿且不接受候補")
@@ -237,7 +268,12 @@ class RegistrationService:
             conn.run("COMMIT")
             
             if waitlisted_courses:
-                waitlist_msg = "，但部分課程已額滿列入候補： " + "、".join(waitlisted_courses)
+                # Build message with positions
+                waitlist_details = []
+                for course_name in waitlisted_courses:
+                    pos = waitlisted_positions.get(course_name, '?')
+                    waitlist_details.append(f"{course_name} (第{pos}位)")
+                waitlist_msg = "，但部分課程已額滿列入候補：" + "、".join(waitlist_details)
                 return {'message': message + waitlist_msg, 'id': new_id, 'waitlisted': True}
             
             return {'message': message, 'id': new_id, 'waitlisted': False}
