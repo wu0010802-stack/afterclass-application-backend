@@ -47,7 +47,7 @@ class AdminService:
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
-                ORDER BY r.created_at ASC
+                ORDER BY r.created_at DESC
             """)
             
             registrations = []
