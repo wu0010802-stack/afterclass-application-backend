@@ -40,7 +40,7 @@ class AdminService:
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
-                ORDER BY r.created_at DESC
+                ORDER BY r.created_at ASC
             """)
             
             registrations = []
@@ -265,8 +265,53 @@ class AdminService:
     def delete_registration(reg_id):
         conn = get_db_connection()
         try:
+            conn.run("BEGIN")
+            
+            # First, get all courses this registration was enrolled in (not waitlist)
+            enrolled_courses = conn.run("""
+                SELECT course_id FROM registration_courses 
+                WHERE registration_id = :reg_id AND status = 'enrolled'
+            """, reg_id=reg_id)
+            
+            course_ids = [row[0] for row in enrolled_courses]
+            
+            # Delete the registration (cascades to registration_courses and registration_supplies)
             conn.run("DELETE FROM registrations WHERE id = :id", id=reg_id)
+            
+            # For each course that had an enrolled student, try to promote the next waitlisted person
+            for course_id in course_ids:
+                # Check if there's capacity now
+                capacity_info = conn.run("""
+                    SELECT c.capacity, 
+                           (SELECT COUNT(*) FROM registration_courses WHERE course_id = :cid AND status = 'enrolled') as enrolled
+                    FROM courses c WHERE c.id = :cid
+                """, cid=course_id)
+                
+                if capacity_info:
+                    capacity = capacity_info[0][0]
+                    enrolled_count = capacity_info[0][1]
+                    
+                    # If there's now room, promote the first waitlisted person (by id order, which is chronological)
+                    if capacity is None or enrolled_count < capacity:
+                        # Find the first waitlisted entry for this course
+                        waitlist_entry = conn.run("""
+                            SELECT id FROM registration_courses 
+                            WHERE course_id = :cid AND status = 'waitlist'
+                            ORDER BY id ASC
+                            LIMIT 1
+                        """, cid=course_id)
+                        
+                        if waitlist_entry:
+                            # Promote this entry
+                            conn.run("""
+                                UPDATE registration_courses SET status = 'enrolled' 
+                                WHERE id = :rc_id
+                            """, rc_id=waitlist_entry[0][0])
+            
             conn.run("COMMIT")
+        except Exception as e:
+            conn.run("ROLLBACK")
+            raise e
         finally:
             conn.close()
 
