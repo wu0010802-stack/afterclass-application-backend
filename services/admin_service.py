@@ -502,3 +502,49 @@ class AdminService:
             conn.run("COMMIT")
         finally:
             conn.close()
+
+    @staticmethod
+    def update_registration(reg_id, data):
+        conn = get_db_connection()
+        try:
+            # First check if registration exists
+            check = conn.run("SELECT id, student_id FROM registrations WHERE id = :id", id=reg_id)
+            if not check:
+                raise ValueError("報名資料不存在")
+            
+            student_id = check[0][1]
+            
+            # Update student name if provided
+            if 'student_name' in data:
+                conn.run("UPDATE students SET name = :name WHERE id = :id",
+                         name=data['student_name'], id=student_id)
+            
+            # Update student birthday if provided
+            if 'birthday' in data and data['birthday']:
+                conn.run("UPDATE students SET birthday = :birthday WHERE id = :id",
+                         birthday=data['birthday'], id=student_id)
+            
+            # Update class if provided
+            class_id = None
+            if 'class_name' in data:
+                class_name = data['class_name']
+                if class_name:
+                    # Try to find existing class
+                    class_res = conn.run("SELECT id FROM classes WHERE name = :name", name=class_name)
+                    if class_res:
+                        class_id = class_res[0][0]
+                    else:
+                        # Create new class
+                        class_res = conn.run("INSERT INTO classes (name) VALUES (:name) RETURNING id", name=class_name)
+                        class_id = class_res[0][0]
+                
+                conn.run("UPDATE registrations SET class_name = :class_name, class_id = :class_id, updated_at = :now WHERE id = :id",
+                         class_name=class_name, class_id=class_id, now=datetime.now(), id=reg_id)
+            
+            conn.run("COMMIT")
+            return {'message': '更新成功'}
+        except Exception as e:
+            conn.run("ROLLBACK")
+            raise e
+        finally:
+            conn.close()
