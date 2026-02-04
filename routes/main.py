@@ -82,3 +82,33 @@ def update_registration():
         return jsonify({'message': str(e)}), 400
     except Exception as e:
         return jsonify({'message': str(e)}), 500
+
+@main_bp.route('/api/inquiries', methods=['POST'])
+def submit_inquiry():
+    """Submit a parent inquiry/question"""
+    try:
+        data = request.get_json()
+        name = data.get('name', '').strip()
+        phone = data.get('phone', '').strip()
+        question = data.get('question', '').strip()
+        
+        if not name:
+            return jsonify({'message': '請輸入您的姓名'}), 400
+        if not phone:
+            return jsonify({'message': '請輸入聯絡電話'}), 400
+        if not question:
+            return jsonify({'message': '請輸入您的問題'}), 400
+        
+        from database import get_db_connection
+        conn = get_db_connection()
+        try:
+            conn.run(
+                "INSERT INTO inquiries (name, phone, question) VALUES (:name, :phone, :question)",
+                name=name, phone=phone, question=question
+            )
+            conn.run("COMMIT")
+            return jsonify({'message': '感謝您的提問，我們會儘快回覆您！'}), 200
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500

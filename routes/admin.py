@@ -246,3 +246,66 @@ def get_async_routes():
         "success": True,
         "data": []
     })
+
+@admin_bp.route('/admin/inquiries', methods=['GET'])
+def get_inquiries():
+    """Get all parent inquiries"""
+    try:
+        from database import get_db_connection
+        from datetime import timezone, timedelta
+        TW_TZ = timezone(timedelta(hours=8))
+        
+        conn = get_db_connection()
+        try:
+            results = conn.run("""
+                SELECT id, name, phone, question, is_read, created_at 
+                FROM inquiries 
+                ORDER BY created_at DESC
+            """)
+            
+            inquiries = []
+            for row in results:
+                inquiries.append({
+                    'id': row[0],
+                    'name': row[1],
+                    'phone': row[2],
+                    'question': row[3],
+                    'is_read': row[4],
+                    'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None
+                })
+            
+            return jsonify({'inquiries': inquiries})
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+@admin_bp.route('/admin/inquiry/<int:inquiry_id>/read', methods=['PUT'])
+def mark_inquiry_read(inquiry_id):
+    """Mark inquiry as read"""
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        try:
+            conn.run("UPDATE inquiries SET is_read = TRUE WHERE id = :id", id=inquiry_id)
+            conn.run("COMMIT")
+            return jsonify({'message': '已標記為已讀'})
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
+
+@admin_bp.route('/admin/inquiry/<int:inquiry_id>', methods=['DELETE'])
+def delete_inquiry(inquiry_id):
+    """Delete an inquiry"""
+    try:
+        from database import get_db_connection
+        conn = get_db_connection()
+        try:
+            conn.run("DELETE FROM inquiries WHERE id = :id", id=inquiry_id)
+            conn.run("COMMIT")
+            return jsonify({'message': '已刪除'})
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500

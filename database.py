@@ -179,6 +179,16 @@ def init_db():
                       value TEXT NOT NULL
                     )''')
         
+        # Inquiries table (for parent questions)
+        conn.run('''CREATE TABLE IF NOT EXISTS inquiries (
+                      id SERIAL PRIMARY KEY,
+                      name TEXT NOT NULL,
+                      phone TEXT NOT NULL,
+                      question TEXT NOT NULL,
+                      is_read BOOLEAN DEFAULT FALSE,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
         # Insert default settings
         default_settings = [
             ('registration_start', '2026-02-02T16:00'),
