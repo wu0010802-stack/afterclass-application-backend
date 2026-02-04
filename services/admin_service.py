@@ -552,6 +552,8 @@ class AdminService:
     def update_registration(reg_id, data):
         conn = get_db_connection()
         try:
+            conn.run("BEGIN")
+            
             # First check if registration exists
             check = conn.run("SELECT id, student_id FROM registrations WHERE id = :id", id=reg_id)
             if not check:
@@ -585,6 +587,44 @@ class AdminService:
                 
                 conn.run("UPDATE registrations SET class_name = :class_name, class_id = :class_id, updated_at = :now WHERE id = :id",
                          class_name=class_name, class_id=class_id, now=datetime.now(), id=reg_id)
+            
+            # Update courses if provided
+            if 'courses' in data:
+                courses = data['courses']
+                # Delete existing courses
+                conn.run("DELETE FROM registration_courses WHERE registration_id = :reg_id", reg_id=reg_id)
+                
+                # Insert new courses
+                for course in courses:
+                    course_name = course.get('name')
+                    if course_name:
+                        course_res = conn.run("SELECT id, price FROM courses WHERE name = :name", name=course_name)
+                        if course_res:
+                            course_id = course_res[0][0]
+                            price = course_res[0][1]
+                            conn.run("""
+                                INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) 
+                                VALUES (:reg_id, :course_id, 'enrolled', :price)
+                            """, reg_id=reg_id, course_id=course_id, price=price)
+            
+            # Update supplies if provided
+            if 'supplies' in data:
+                supplies = data['supplies']
+                # Delete existing supplies
+                conn.run("DELETE FROM registration_supplies WHERE registration_id = :reg_id", reg_id=reg_id)
+                
+                # Insert new supplies
+                for supply in supplies:
+                    supply_name = supply.get('name')
+                    if supply_name:
+                        supply_res = conn.run("SELECT id, price FROM supplies WHERE name = :name", name=supply_name)
+                        if supply_res:
+                            supply_id = supply_res[0][0]
+                            price = supply_res[0][1]
+                            conn.run("""
+                                INSERT INTO registration_supplies (registration_id, supply_id, price_snapshot) 
+                                VALUES (:reg_id, :supply_id, :price)
+                            """, reg_id=reg_id, supply_id=supply_id, price=price)
             
             conn.run("COMMIT")
             return {'message': '更新成功'}
