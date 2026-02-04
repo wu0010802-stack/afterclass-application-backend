@@ -189,6 +189,16 @@ def init_db():
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )''')
         
+        # Registration changes table (for tracking modifications)
+        conn.run('''CREATE TABLE IF NOT EXISTS registration_changes (
+                      id SERIAL PRIMARY KEY,
+                      registration_id INTEGER REFERENCES registrations(id) ON DELETE CASCADE,
+                      student_name TEXT NOT NULL,
+                      change_type TEXT NOT NULL,
+                      change_description TEXT NOT NULL,
+                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
         # Insert default settings
         default_settings = [
             ('registration_start', '2026-02-02T16:00'),

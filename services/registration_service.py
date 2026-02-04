@@ -158,6 +158,24 @@ class RegistrationService:
                 if not reg_id:
                     raise ValueError("Missing ID for update")
                 
+                # Fetch OLD data for comparison
+                old_data = conn.run("""
+                    SELECT s.name, r.class_name, s.birthday,
+                           (SELECT string_agg(c.name, '、') FROM registration_courses rc 
+                            JOIN courses c ON rc.course_id = c.id WHERE rc.registration_id = r.id) as old_courses,
+                           (SELECT string_agg(sp.name, '、') FROM registration_supplies rs
+                            JOIN supplies sp ON rs.supply_id = sp.id WHERE rs.registration_id = r.id) as old_supplies
+                    FROM registrations r
+                    JOIN students s ON r.student_id = s.id
+                    WHERE r.id = :id
+                """, id=reg_id)
+                
+                old_student_name = old_data[0][0] if old_data else ''
+                old_class = old_data[0][1] if old_data else ''
+                old_birthday = old_data[0][2].strftime('%Y-%m-%d') if old_data and old_data[0][2] else ''
+                old_courses_str = old_data[0][3] if old_data and old_data[0][3] else ''
+                old_supplies_str = old_data[0][4] if old_data and old_data[0][4] else ''
+                
                 # Fetch student_id
                 student_res = conn.run("SELECT student_id FROM registrations WHERE id=:id", id=reg_id)
                 if student_res:
@@ -186,6 +204,31 @@ class RegistrationService:
                 conn.run("DELETE FROM registration_courses WHERE registration_id=:id", id=reg_id)
                 conn.run("DELETE FROM registration_supplies WHERE registration_id=:id", id=reg_id)
                 new_id = reg_id
+                
+                # Build change descriptions
+                changes = []
+                new_courses_names = [c.get('name', '') for c in courses]
+                new_supplies_names = [s.get('name', '') for s in supplies]
+                new_courses_str = '、'.join(new_courses_names)
+                new_supplies_str = '、'.join(new_supplies_names)
+                
+                if old_class != class_name:
+                    changes.append(f"班級：{old_class or '無'} → {class_name}")
+                if old_birthday != birthday:
+                    changes.append(f"生日：{old_birthday or '無'} → {birthday}")
+                if old_courses_str != new_courses_str:
+                    changes.append(f"課程：{old_courses_str or '無'} → {new_courses_str or '無'}")
+                if old_supplies_str != new_supplies_str:
+                    changes.append(f"用品：{old_supplies_str or '無'} → {new_supplies_str or '無'}")
+                
+                # Record change if any
+                if changes:
+                    change_description = '；'.join(changes)
+                    conn.run("""
+                        INSERT INTO registration_changes (registration_id, student_name, change_type, change_description)
+                        VALUES (:reg_id, :student_name, :change_type, :change_desc)
+                    """, reg_id=reg_id, student_name=name or old_student_name, change_type='前台修改', change_desc=change_description)
+                
                 message = '更新成功！'
             else:
                 # Insert or get student

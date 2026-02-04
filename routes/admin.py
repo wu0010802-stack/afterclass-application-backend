@@ -309,3 +309,37 @@ def delete_inquiry(inquiry_id):
             conn.close()
     except Exception as e:
         return jsonify({'message': str(e)}), 500
+
+@admin_bp.route('/admin/registration-changes', methods=['GET'])
+def get_registration_changes():
+    """Get all registration change logs"""
+    try:
+        from database import get_db_connection
+        from datetime import timezone, timedelta
+        TW_TZ = timezone(timedelta(hours=8))
+        
+        conn = get_db_connection()
+        try:
+            results = conn.run("""
+                SELECT id, registration_id, student_name, change_type, change_description, created_at 
+                FROM registration_changes 
+                ORDER BY created_at DESC
+                LIMIT 50
+            """)
+            
+            changes = []
+            for row in results:
+                changes.append({
+                    'id': row[0],
+                    'registration_id': row[1],
+                    'student_name': row[2],
+                    'change_type': row[3],
+                    'change_description': row[4],
+                    'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None
+                })
+            
+            return jsonify({'changes': changes})
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'message': str(e)}), 500
