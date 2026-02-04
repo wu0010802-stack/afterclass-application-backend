@@ -113,6 +113,9 @@ class RegistrationService:
         if start:
             try:
                 start_dt = datetime.fromisoformat(start)
+                # Add timezone info if naive
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=TW_TZ)
                 if current_time < start_dt:
                     raise ValueError(f"報名尚未開始 (開放時間: {start})")
             except ValueError:
@@ -121,6 +124,9 @@ class RegistrationService:
         if end:
             try:
                 end_dt = datetime.fromisoformat(end)
+                # Add timezone info if naive
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=TW_TZ)
                 if current_time > end_dt:
                     raise ValueError(f"報名已截止 (截止時間: {end})")
             except ValueError:
