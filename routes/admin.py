@@ -1,19 +1,22 @@
 
-from flask import Blueprint, request, jsonify, abort
+from datetime import datetime as _datetime, timezone, timedelta
+from flask import Blueprint, request, jsonify
+import jwt
+
 from services.admin_service import AdminService
 from config import Config
-import secrets
-
-import jwt
-import datetime
+from database import get_db_connection
 
 admin_bp = Blueprint('admin', __name__)
 
+TW_TZ = timezone(timedelta(hours=8))
+
 def generate_token():
+    now = _datetime.utcnow()
     payload = {
         'sub': 'admin',
-        'iat': datetime.datetime.utcnow(),
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
+        'iat': now,
+        'exp': now + timedelta(days=7),
     }
     return jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
 
@@ -251,29 +254,21 @@ def get_async_routes():
 def get_inquiries():
     """Get all parent inquiries"""
     try:
-        from database import get_db_connection
-        from datetime import timezone, timedelta
-        TW_TZ = timezone(timedelta(hours=8))
-        
         conn = get_db_connection()
         try:
             results = conn.run("""
-                SELECT id, name, phone, question, is_read, created_at 
-                FROM inquiries 
+                SELECT id, name, phone, question, is_read, created_at
+                FROM inquiries
                 ORDER BY created_at DESC
             """)
-            
-            inquiries = []
-            for row in results:
-                inquiries.append({
-                    'id': row[0],
-                    'name': row[1],
-                    'phone': row[2],
-                    'question': row[3],
-                    'is_read': row[4],
-                    'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None
-                })
-            
+            inquiries = [{
+                'id': row[0],
+                'name': row[1],
+                'phone': row[2],
+                'question': row[3],
+                'is_read': row[4],
+                'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None,
+            } for row in results]
             return jsonify({'inquiries': inquiries})
         finally:
             conn.close()
@@ -284,7 +279,6 @@ def get_inquiries():
 def mark_inquiry_read(inquiry_id):
     """Mark inquiry as read"""
     try:
-        from database import get_db_connection
         conn = get_db_connection()
         try:
             conn.run("UPDATE inquiries SET is_read = TRUE WHERE id = :id", id=inquiry_id)
@@ -299,7 +293,6 @@ def mark_inquiry_read(inquiry_id):
 def delete_inquiry(inquiry_id):
     """Delete an inquiry"""
     try:
-        from database import get_db_connection
         conn = get_db_connection()
         try:
             conn.run("DELETE FROM inquiries WHERE id = :id", id=inquiry_id)
@@ -314,30 +307,22 @@ def delete_inquiry(inquiry_id):
 def get_registration_changes():
     """Get all registration change logs"""
     try:
-        from database import get_db_connection
-        from datetime import timezone, timedelta
-        TW_TZ = timezone(timedelta(hours=8))
-        
         conn = get_db_connection()
         try:
             results = conn.run("""
-                SELECT id, registration_id, student_name, change_type, change_description, created_at 
-                FROM registration_changes 
+                SELECT id, registration_id, student_name, change_type, change_description, created_at
+                FROM registration_changes
                 ORDER BY created_at DESC
                 LIMIT 50
             """)
-            
-            changes = []
-            for row in results:
-                changes.append({
-                    'id': row[0],
-                    'registration_id': row[1],
-                    'student_name': row[2],
-                    'change_type': row[3],
-                    'change_description': row[4],
-                    'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None
-                })
-            
+            changes = [{
+                'id': row[0],
+                'registration_id': row[1],
+                'student_name': row[2],
+                'change_type': row[3],
+                'change_description': row[4],
+                'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None,
+            } for row in results]
             return jsonify({'changes': changes})
         finally:
             conn.close()

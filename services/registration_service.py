@@ -44,36 +44,34 @@ class RegistrationService:
             reg = results[0]
             reg_id = reg[0]
             
-            # Get courses with status and waitlist position
+            # Compute waitlist position with a window function in a single query.
+            # The window has to be computed across ALL rows for the course before
+            # filtering by registration_id, so we wrap it in a subquery.
             course_results = conn.run("""
-                SELECT c.name, c.price, rc.status, rc.id as rc_id, rc.course_id
-                FROM registration_courses rc
-                JOIN courses c ON rc.course_id = c.id
-                WHERE rc.registration_id = :reg_id
+                SELECT name, price, status, waitlist_position
+                FROM (
+                    SELECT rc.registration_id, c.name, c.price, rc.status,
+                           CASE WHEN rc.status = 'waitlist'
+                                THEN ROW_NUMBER() OVER (
+                                        PARTITION BY rc.course_id, rc.status
+                                        ORDER BY rc.id
+                                     )
+                                ELSE NULL END AS waitlist_position
+                    FROM registration_courses rc
+                    JOIN courses c ON rc.course_id = c.id
+                ) sub
+                WHERE registration_id = :reg_id
             """, reg_id=reg_id)
-            
+
             courses = []
             for row in course_results:
                 course_data = {
-                    'name': row[0], 
+                    'name': row[0],
                     'price': str(row[1]),
-                    'status': row[2]
+                    'status': row[2],
                 }
-                
-                # If waitlisted, calculate position
                 if row[2] == 'waitlist':
-                    rc_id = row[3]
-                    course_id = row[4]
-                    # Count how many waitlist entries came before this one
-                    position_result = conn.run("""
-                        SELECT COUNT(*) + 1 
-                        FROM registration_courses 
-                        WHERE course_id = :course_id 
-                          AND status = 'waitlist' 
-                          AND id < :rc_id
-                    """, course_id=course_id, rc_id=rc_id)
-                    course_data['waitlist_position'] = position_result[0][0] if position_result else 1
-                
+                    course_data['waitlist_position'] = row[3] or 1
                 courses.append(course_data)
             
             # Get supplies
@@ -265,61 +263,68 @@ class RegistrationService:
                 new_id = reg_result[0][0]
                 message = '報名成功！'
 
-            # Insert courses with capacity check
+            # Pre-fetch all course metadata + current enrollment counts in ONE
+            # query. Locks the course rows to prevent concurrent enrollment from
+            # over-filling capacity. (Was 3 round-trips per course.)
             waitlisted_courses = []
-            waitlisted_positions = {}  # Store course_name -> position
-            full_error_courses = []
-            
-            for course in courses:
-                # Get price for snapshot
-                course_result = conn.run("SELECT id, capacity, price, allow_waitlist FROM courses WHERE name=:name FOR UPDATE", name=course['name'])
-                
-                if course_result:
-                    course_id = course_result[0][0]
-                    capacity = course_result[0][1]
-                    price_snapshot = course_result[0][2]
-                    allow_waitlist = course_result[0][3] if course_result[0][3] is not None else True
-                    status = 'enrolled'
-                    
-                    if capacity is not None:
-                        # Only count ENROLLED students
-                        count_result = conn.run(
-                            "SELECT COUNT(*) FROM registration_courses WHERE course_id=:cid AND status='enrolled'", 
-                            cid=course_id
-                        )
-                        current_count = count_result[0][0]
-                        
-                        if current_count >= capacity:
-                            if allow_waitlist:
-                                status = 'waitlist'
-                                # Calculate waitlist position (how many are already waitlisted + 1)
-                                waitlist_count = conn.run(
-                                    "SELECT COUNT(*) FROM registration_courses WHERE course_id=:cid AND status='waitlist'",
-                                    cid=course_id
-                                )
-                                position = waitlist_count[0][0] + 1
-                                waitlisted_courses.append(course['name'])
-                                waitlisted_positions[course['name']] = position
-                            else:
-                                full_error_courses.append(course['name'])
-                                raise ValueError(f"課程 {course['name']} 已額滿且不接受候補")
+            waitlisted_positions = {}
+            course_names = [c['name'] for c in courses if c.get('name')]
+            course_meta = {}
+            if course_names:
+                rows = conn.run("""
+                    SELECT c.name, c.id, c.capacity, c.price,
+                           COALESCE(c.allow_waitlist, TRUE) AS allow_waitlist,
+                           (SELECT COUNT(*) FROM registration_courses rc
+                              WHERE rc.course_id = c.id AND rc.status = 'enrolled') AS enrolled_count,
+                           (SELECT COUNT(*) FROM registration_courses rc
+                              WHERE rc.course_id = c.id AND rc.status = 'waitlist') AS waitlist_count
+                    FROM courses c
+                    WHERE c.name = ANY(:names)
+                    FOR UPDATE OF c
+                """, names=course_names)
+                course_meta = {r[0]: {
+                    'id': r[1], 'capacity': r[2], 'price': r[3],
+                    'allow_waitlist': r[4], 'enrolled': r[5], 'waitlist': r[6],
+                } for r in rows}
 
-                    conn.run(
-                        "INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) VALUES (:reg_id, :course_id, :status, :price)",
-                        reg_id=new_id, course_id=course_id, status=status, price=price_snapshot
-                    )
-            
-            # Insert supplies
-            for supply in supplies:
-                # Get price for snapshot
-                supply_result = conn.run("SELECT id, price FROM supplies WHERE name=:name", name=supply['name'])
-                if supply_result:
-                    supply_id = supply_result[0][0]
-                    price_snapshot = supply_result[0][1]
-                    conn.run(
-                        "INSERT INTO registration_supplies (registration_id, supply_id, price_snapshot) VALUES (:reg_id, :supply_id, :price)",
-                        reg_id=new_id, supply_id=supply_id, price=price_snapshot
-                    )
+            for course in courses:
+                meta = course_meta.get(course.get('name'))
+                if not meta:
+                    continue
+                status = 'enrolled'
+                capacity = meta['capacity']
+                if capacity is not None and meta['enrolled'] >= capacity:
+                    if meta['allow_waitlist']:
+                        status = 'waitlist'
+                        meta['waitlist'] += 1
+                        waitlisted_courses.append(course['name'])
+                        waitlisted_positions[course['name']] = meta['waitlist']
+                    else:
+                        raise ValueError(f"課程 {course['name']} 已額滿且不接受候補")
+                else:
+                    meta['enrolled'] += 1
+
+                conn.run(
+                    "INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) VALUES (:reg_id, :course_id, :status, :price)",
+                    reg_id=new_id, course_id=meta['id'], status=status, price=meta['price'],
+                )
+
+            # Pre-fetch supply metadata in one query, then insert.
+            supply_names = [s['name'] for s in supplies if s.get('name')]
+            if supply_names:
+                supply_rows = conn.run(
+                    "SELECT name, id, price FROM supplies WHERE name = ANY(:names)",
+                    names=supply_names,
+                )
+                supply_meta = {r[0]: (r[1], r[2]) for r in supply_rows}
+                for supply in supplies:
+                    found = supply_meta.get(supply.get('name'))
+                    if found:
+                        supply_id, price_snapshot = found
+                        conn.run(
+                            "INSERT INTO registration_supplies (registration_id, supply_id, price_snapshot) VALUES (:reg_id, :supply_id, :price)",
+                            reg_id=new_id, supply_id=supply_id, price=price_snapshot,
+                        )
             
             conn.run("COMMIT")
             
