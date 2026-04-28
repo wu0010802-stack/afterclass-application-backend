@@ -14,40 +14,52 @@ class AdminService:
     def get_all_registrations():
         conn = get_db_connection()
         try:
+            # Pre-compute waitlist position with a window function once
+            # (was previously a correlated subquery executed per row).
             results = conn.run("""
-                SELECT 
-                    r.id, 
-                    s.name as student_name, 
+                WITH course_lines AS (
+                    SELECT
+                        rc.registration_id,
+                        CASE
+                            WHEN rc.status = 'waitlist'
+                                THEN c.name || ' (候補順位: ' || ROW_NUMBER() OVER (
+                                        PARTITION BY rc.course_id, rc.status
+                                        ORDER BY rc.id
+                                     ) || ')'
+                            ELSE c.name
+                        END AS line
+                    FROM registration_courses rc
+                    JOIN courses c ON rc.course_id = c.id
+                ),
+                course_agg AS (
+                    SELECT registration_id,
+                           string_agg(line, '、') AS course_names,
+                           COUNT(*) AS course_count
+                    FROM course_lines
+                    GROUP BY registration_id
+                ),
+                supply_agg AS (
+                    SELECT registration_id, COUNT(*) AS supply_count
+                    FROM registration_supplies
+                    GROUP BY registration_id
+                )
+                SELECT
+                    r.id,
+                    s.name AS student_name,
                     s.birthday,
-                    COALESCE(cl.name, r.class_name) as class_name,
+                    COALESCE(cl.name, r.class_name) AS class_name,
                     r.created_at,
                     r.updated_at,
-                    (SELECT COUNT(*) FROM registration_courses rc WHERE rc.registration_id = r.id) as course_count,
-                    (SELECT COUNT(*) FROM registration_supplies rs WHERE rs.registration_id = r.id) as supply_count,
+                    COALESCE(ca.course_count, 0) AS course_count,
+                    COALESCE(sa.supply_count, 0) AS supply_count,
                     r.is_paid,
-                    COALESCE((
-                        SELECT string_agg(
-                            CASE 
-                                WHEN rc.status = 'waitlist' THEN 
-                                    c.name || ' (候補順位: ' || (
-                                        SELECT COUNT(*) + 1
-                                        FROM registration_courses rc2
-                                        WHERE rc2.course_id = rc.course_id
-                                          AND rc2.status = 'waitlist'
-                                          AND rc2.id < rc.id
-                                    ) || ')'
-                                ELSE c.name 
-                            END, 
-                            '、'
-                        ) 
-                        FROM registration_courses rc 
-                        JOIN courses c ON rc.course_id = c.id 
-                        WHERE rc.registration_id = r.id
-                    ), '') as course_names,
+                    COALESCE(ca.course_names, '') AS course_names,
                     r.remark
                 FROM registrations r
                 JOIN students s ON r.student_id = s.id
                 LEFT JOIN classes cl ON r.class_id = cl.id
+                LEFT JOIN course_agg ca ON ca.registration_id = r.id
+                LEFT JOIN supply_agg sa ON sa.registration_id = r.id
                 ORDER BY r.created_at DESC
             """)
             
@@ -201,6 +213,8 @@ class AdminService:
             return courses
         finally:
             conn.close()
+
+    @staticmethod
     def get_registration_detail(reg_id):
         conn = get_db_connection()
         try:
@@ -600,40 +614,42 @@ class AdminService:
             # Update courses if provided
             if 'courses' in data:
                 courses = data['courses']
-                # Delete existing courses
                 conn.run("DELETE FROM registration_courses WHERE registration_id = :reg_id", reg_id=reg_id)
-                
-                # Insert new courses
-                for course in courses:
-                    course_name = course.get('name')
-                    if course_name:
-                        course_res = conn.run("SELECT id, price FROM courses WHERE name = :name", name=course_name)
-                        if course_res:
-                            course_id = course_res[0][0]
-                            price = course_res[0][1]
-                            conn.run("""
-                                INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) 
-                                VALUES (:reg_id, :course_id, 'enrolled', :price)
-                            """, reg_id=reg_id, course_id=course_id, price=price)
-            
+                course_names = [c.get('name') for c in courses if c.get('name')]
+                if course_names:
+                    course_rows = conn.run(
+                        "SELECT name, id, price FROM courses WHERE name = ANY(:names)",
+                        names=course_names,
+                    )
+                    course_meta = {r[0]: (r[1], r[2]) for r in course_rows}
+                    for course in courses:
+                        found = course_meta.get(course.get('name'))
+                        if found:
+                            course_id, price = found
+                            conn.run(
+                                "INSERT INTO registration_courses (registration_id, course_id, status, price_snapshot) VALUES (:reg_id, :course_id, 'enrolled', :price)",
+                                reg_id=reg_id, course_id=course_id, price=price,
+                            )
+
             # Update supplies if provided
             if 'supplies' in data:
                 supplies = data['supplies']
-                # Delete existing supplies
                 conn.run("DELETE FROM registration_supplies WHERE registration_id = :reg_id", reg_id=reg_id)
-                
-                # Insert new supplies
-                for supply in supplies:
-                    supply_name = supply.get('name')
-                    if supply_name:
-                        supply_res = conn.run("SELECT id, price FROM supplies WHERE name = :name", name=supply_name)
-                        if supply_res:
-                            supply_id = supply_res[0][0]
-                            price = supply_res[0][1]
-                            conn.run("""
-                                INSERT INTO registration_supplies (registration_id, supply_id, price_snapshot) 
-                                VALUES (:reg_id, :supply_id, :price)
-                            """, reg_id=reg_id, supply_id=supply_id, price=price)
+                supply_names = [s.get('name') for s in supplies if s.get('name')]
+                if supply_names:
+                    supply_rows = conn.run(
+                        "SELECT name, id, price FROM supplies WHERE name = ANY(:names)",
+                        names=supply_names,
+                    )
+                    supply_meta = {r[0]: (r[1], r[2]) for r in supply_rows}
+                    for supply in supplies:
+                        found = supply_meta.get(supply.get('name'))
+                        if found:
+                            supply_id, price = found
+                            conn.run(
+                                "INSERT INTO registration_supplies (registration_id, supply_id, price_snapshot) VALUES (:reg_id, :supply_id, :price)",
+                                reg_id=reg_id, supply_id=supply_id, price=price,
+                            )
             
             conn.run("COMMIT")
             return {'message': '更新成功'}

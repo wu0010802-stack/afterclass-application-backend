@@ -1,12 +1,12 @@
 
-from flask import Flask, send_from_directory, request
-from config import Config
+import os
+from flask import Flask, send_from_directory
 from flask_cors import CORS
-from database import init_db
 
+from config import Config
+from database import init_db
 from routes.main import main_bp
 from routes.admin import admin_bp
-import os
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -18,8 +18,6 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 app.register_blueprint(main_bp)
 app.register_blueprint(admin_bp)
 
-# Initialize Database
-init_db()
 
 @app.route('/favicon.ico')
 def favicon():
@@ -29,7 +27,7 @@ def favicon():
     except Exception:
         return '', 204
 
-# Route for xlsx library (backward compatibility or update html)
+
 @app.route('/xlsx.full.min.js')
 def xlsx_lib():
     try:
@@ -37,6 +35,11 @@ def xlsx_lib():
     except Exception:
         return '', 204
 
+
 if __name__ == '__main__':
+    # Schema init only happens for local dev runs; production uses start.sh
+    # which invokes init_db() once before forking gunicorn workers.
+    init_db()
+    debug = os.environ.get('FLASK_DEBUG', '1') == '1'
     print(f"Flask Server running at http://localhost:{Config.PORT}/")
-    app.run(host='0.0.0.0', port=Config.PORT, debug=True)
+    app.run(host='0.0.0.0', port=Config.PORT, debug=debug)

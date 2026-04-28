@@ -1,7 +1,9 @@
 
 from flask import Blueprint, request, jsonify
+
 from services.registration_service import RegistrationService
 from services.admin_service import AdminService
+from database import get_db_connection
 
 main_bp = Blueprint('main', __name__)
 
@@ -98,8 +100,7 @@ def submit_inquiry():
             return jsonify({'message': '請輸入聯絡電話'}), 400
         if not question:
             return jsonify({'message': '請輸入您的問題'}), 400
-        
-        from database import get_db_connection
+
         conn = get_db_connection()
         try:
             conn.run(
