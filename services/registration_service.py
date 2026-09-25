@@ -1,14 +1,7 @@
 
 from database import get_db_connection
-from datetime import datetime, timedelta, timezone
-import json
-
-# Taiwan timezone (UTC+8)
-TW_TZ = timezone(timedelta(hours=8))
-
-def get_taiwan_time():
-    """Get current time in Taiwan timezone"""
-    return datetime.now(TW_TZ)
+from datetime import datetime
+from services.utils import TW_TZ, get_taiwan_time
 
 class RegistrationService:
     @staticmethod
@@ -156,10 +149,10 @@ class RegistrationService:
                 if not reg_id:
                     raise ValueError("Missing ID for update")
                 
-                # Fetch OLD data for comparison
+                # Fetch OLD data + student_id for comparison in a single query.
                 old_data = conn.run("""
-                    SELECT s.name, r.class_name, s.birthday,
-                           (SELECT string_agg(c.name, '、') FROM registration_courses rc 
+                    SELECT s.name, r.class_name, s.birthday, r.student_id,
+                           (SELECT string_agg(c.name, '、') FROM registration_courses rc
                             JOIN courses c ON rc.course_id = c.id WHERE rc.registration_id = r.id) as old_courses,
                            (SELECT string_agg(sp.name, '、') FROM registration_supplies rs
                             JOIN supplies sp ON rs.supply_id = sp.id WHERE rs.registration_id = r.id) as old_supplies
@@ -167,32 +160,28 @@ class RegistrationService:
                     JOIN students s ON r.student_id = s.id
                     WHERE r.id = :id
                 """, id=reg_id)
-                
+
                 old_student_name = old_data[0][0] if old_data else ''
                 old_class = old_data[0][1] if old_data else ''
                 old_birthday = old_data[0][2].strftime('%Y-%m-%d') if old_data and old_data[0][2] else ''
-                old_courses_str = old_data[0][3] if old_data and old_data[0][3] else ''
-                old_supplies_str = old_data[0][4] if old_data and old_data[0][4] else ''
-                
-                # Fetch student_id
-                student_res = conn.run("SELECT student_id FROM registrations WHERE id=:id", id=reg_id)
-                if student_res:
-                    student_id = student_res[0][0]
-                    # Update student birthday if provided
-                    if birthday:
-                         conn.run("UPDATE students SET birthday=:birthday WHERE id=:id", birthday=birthday, id=student_id)
+                old_courses_str = old_data[0][4] if old_data and old_data[0][4] else ''
+                old_supplies_str = old_data[0][5] if old_data and old_data[0][5] else ''
 
-                # Resolve class_id
+                if old_data:
+                    student_id = old_data[0][3]
+                    if birthday:
+                        conn.run("UPDATE students SET birthday=:birthday WHERE id=:id", birthday=birthday, id=student_id)
+
+                # Resolve class_id (atomic upsert-returning-id).
                 class_id = None
                 if class_name:
-                    # Try to find class_id
-                    res = conn.run("SELECT id FROM classes WHERE name = :name", name=class_name)
-                    if res:
-                        class_id = res[0][0]
-                    else:
-                        # Auto-create class if not exists (optional, but good for stability)
-                        res = conn.run("INSERT INTO classes (name) VALUES (:name) RETURNING id", name=class_name)
-                        class_id = res[0][0]
+                    res = conn.run(
+                        """INSERT INTO classes (name) VALUES (:name)
+                           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                           RETURNING id""",
+                        name=class_name,
+                    )
+                    class_id = res[0][0]
 
                 conn.run(
                     "UPDATE registrations SET class_name=:class_name, class_id=:class_id, updated_at=:now WHERE id=:id",
@@ -244,17 +233,17 @@ class RegistrationService:
                     )
                     student_id = student_result[0][0]
                 
-                # Resolve class_id
+                # Resolve class_id (atomic upsert-returning-id).
                 class_id = None
                 if class_name:
-                    res = conn.run("SELECT id FROM classes WHERE name = :name", name=class_name)
-                    if res:
-                        class_id = res[0][0]
-                    else:
-                         # Auto-create class if not exists
-                        res = conn.run("INSERT INTO classes (name) VALUES (:name) RETURNING id", name=class_name)
-                        class_id = res[0][0]
-                
+                    res = conn.run(
+                        """INSERT INTO classes (name) VALUES (:name)
+                           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                           RETURNING id""",
+                        name=class_name,
+                    )
+                    class_id = res[0][0]
+
                 # Create registration
                 reg_result = conn.run(
                     "INSERT INTO registrations (student_id, class_name, class_id, created_at, updated_at) VALUES (:student_id, :class_name, :class_id, :now, :now) RETURNING id",
@@ -280,6 +269,7 @@ class RegistrationService:
                               WHERE rc.course_id = c.id AND rc.status = 'waitlist') AS waitlist_count
                     FROM courses c
                     WHERE c.name = ANY(:names)
+                    ORDER BY c.id
                     FOR UPDATE OF c
                 """, names=course_names)
                 course_meta = {r[0]: {

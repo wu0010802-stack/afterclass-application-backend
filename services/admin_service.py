@@ -1,13 +1,6 @@
 
 from database import get_db_connection
-from datetime import datetime, timedelta, timezone
-
-# Taiwan timezone (UTC+8)
-TW_TZ = timezone(timedelta(hours=8))
-
-def get_taiwan_time():
-    """Get current time in Taiwan timezone"""
-    return datetime.now(TW_TZ)
+from services.utils import TW_TZ, get_taiwan_time, tw_iso
 
 class AdminService:
     @staticmethod
@@ -70,8 +63,8 @@ class AdminService:
                     'student_name': row[1],
                     'birthday': row[2].strftime('%Y-%m-%d') if row[2] else None,
                     'class_name': row[3],
-                    'created_at': row[4].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[4] else None,
-                    'updated_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None,
+                    'created_at': tw_iso(row[4]),
+                    'updated_at': tw_iso(row[5]),
                     'course_count': row[6],
                     'supply_count': row[7],
                     'is_paid': row[8],
@@ -90,47 +83,47 @@ class AdminService:
         conn = get_db_connection()
         try:
             current_date = get_taiwan_time().date()
-            # Stats Summary
-            summary_query = """
-                SELECT 
-                    (SELECT COUNT(*) FROM registrations) as total_registrations,
-                    (SELECT COUNT(*) FROM students) as total_students,
-                    (SELECT COUNT(*) FROM registration_courses WHERE status = 'enrolled') as total_enrollments,
-                    (SELECT COUNT(*) FROM registration_courses WHERE status = 'waitlist') as total_waitlist,
-                    (SELECT COUNT(*) FROM registration_supplies) as total_supplies,
-                    (SELECT COUNT(*) FROM registrations WHERE DATE(created_at) = :today) as today_new,
-                    (SELECT SUM(capacity) FROM courses) as total_capacity
-            """
-            summary_res = conn.run(summary_query, today=current_date)[0]
-            
-            # Revenue Calculation
-            # 1. Course Revenue
-            course_rev = conn.run("""
-                SELECT 
-                    SUM(CASE WHEN r.is_paid IS TRUE THEN c.price ELSE 0 END) as paid,
-                    SUM(CASE WHEN r.is_paid IS NOT TRUE THEN c.price ELSE 0 END) as unpaid
-                FROM registration_courses rc 
-                JOIN registrations r ON rc.registration_id = r.id
-                JOIN courses c ON rc.course_id = c.id
-                WHERE rc.status = 'enrolled'
-            """)[0]
-            
-            # 2. Supply Revenue
-            supply_rev = conn.run("""
-                SELECT 
-                    SUM(CASE WHEN r.is_paid IS TRUE THEN s.price ELSE 0 END) as paid,
-                    SUM(CASE WHEN r.is_paid IS NOT TRUE THEN s.price ELSE 0 END) as unpaid
-                FROM registration_supplies rs
-                JOIN registrations r ON rs.registration_id = r.id
-                JOIN supplies s ON rs.supply_id = s.id
-            """)[0]
-            
-            total_revenue = (course_rev[0] or 0) + (supply_rev[0] or 0)
-            total_unpaid = (course_rev[1] or 0) + (supply_rev[1] or 0)
-            
-            # Calculate Enrollment Rate
-            total_enrollments = summary_res[2]
-            total_capacity = summary_res[6]
+            # Combine all scalar aggregates (summary + course revenue + supply
+            # revenue) into a single round-trip.
+            combined = conn.run("""
+                WITH course_rev AS (
+                    SELECT
+                        COALESCE(SUM(CASE WHEN r.is_paid IS TRUE THEN c.price ELSE 0 END), 0) AS paid,
+                        COALESCE(SUM(CASE WHEN r.is_paid IS NOT TRUE THEN c.price ELSE 0 END), 0) AS unpaid
+                    FROM registration_courses rc
+                    JOIN registrations r ON rc.registration_id = r.id
+                    JOIN courses c ON rc.course_id = c.id
+                    WHERE rc.status = 'enrolled'
+                ),
+                supply_rev AS (
+                    SELECT
+                        COALESCE(SUM(CASE WHEN r.is_paid IS TRUE THEN s.price ELSE 0 END), 0) AS paid,
+                        COALESCE(SUM(CASE WHEN r.is_paid IS NOT TRUE THEN s.price ELSE 0 END), 0) AS unpaid
+                    FROM registration_supplies rs
+                    JOIN registrations r ON rs.registration_id = r.id
+                    JOIN supplies s ON rs.supply_id = s.id
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM registrations),
+                    (SELECT COUNT(*) FROM students),
+                    (SELECT COUNT(*) FROM registration_courses WHERE status = 'enrolled'),
+                    (SELECT COUNT(*) FROM registration_courses WHERE status = 'waitlist'),
+                    (SELECT COUNT(*) FROM registration_supplies),
+                    (SELECT COUNT(*) FROM registrations WHERE DATE(created_at) = :today),
+                    (SELECT SUM(capacity) FROM courses),
+                    (SELECT paid FROM course_rev),
+                    (SELECT unpaid FROM course_rev),
+                    (SELECT paid FROM supply_rev),
+                    (SELECT unpaid FROM supply_rev)
+            """, today=current_date)[0]
+
+            (total_regs, total_students, total_enrollments, total_waitlist,
+             total_supplies, today_new, total_capacity,
+             course_paid, course_unpaid, supply_paid, supply_unpaid) = combined
+
+            total_revenue = (course_paid or 0) + (supply_paid or 0)
+            total_unpaid = (course_unpaid or 0) + (supply_unpaid or 0)
+
             enrollment_rate = 0
             if total_capacity and total_capacity > 0:
                 enrollment_rate = round((total_enrollments / total_capacity) * 100, 1)
@@ -158,12 +151,12 @@ class AdminService:
             
             return {
                 'statistics': {
-                    'totalRegistrations': summary_res[0],
-                    'totalStudents': summary_res[1],
-                    'totalCourseEnrollments': summary_res[2],
-                    'totalWaitlist': summary_res[3],
-                    'totalSupplyOrders': summary_res[4],
-                    'todayNewRegistrations': summary_res[5],
+                    'totalRegistrations': total_regs,
+                    'totalStudents': total_students,
+                    'totalCourseEnrollments': total_enrollments,
+                    'totalWaitlist': total_waitlist,
+                    'totalSupplyOrders': total_supplies,
+                    'todayNewRegistrations': today_new,
                     'totalRevenue': total_revenue,
                     'totalUnpaid': total_unpaid,
                     'enrollmentRate': enrollment_rate
@@ -261,8 +254,8 @@ class AdminService:
                 'id': reg[0],
                 'student_name': reg[1],
                 'class_name': reg[2],
-                'created_at': reg[3].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if reg[3] else None,
-                'updated_at': reg[4].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if reg[4] else None,
+                'created_at': tw_iso(reg[3]),
+                'updated_at': tw_iso(reg[4]),
                 'birthday': reg[5].strftime('%Y-%m-%d') if reg[5] else None,
                 'is_paid': reg[6],
                 'remark': reg[7] or '',
@@ -289,48 +282,45 @@ class AdminService:
         conn = get_db_connection()
         try:
             conn.run("BEGIN")
-            
-            # First, get all courses this registration was enrolled in (not waitlist)
+
+            # Snapshot which courses will free up a seat BEFORE cascade delete.
             enrolled_courses = conn.run("""
-                SELECT course_id FROM registration_courses 
+                SELECT course_id FROM registration_courses
                 WHERE registration_id = :reg_id AND status = 'enrolled'
             """, reg_id=reg_id)
-            
             course_ids = [row[0] for row in enrolled_courses]
-            
-            # Delete the registration (cascades to registration_courses and registration_supplies)
+
+            # Cascade-delete the registration and its junction rows.
             conn.run("DELETE FROM registrations WHERE id = :id", id=reg_id)
-            
-            # For each course that had an enrolled student, try to promote the next waitlisted person
-            for course_id in course_ids:
-                # Check if there's capacity now
-                capacity_info = conn.run("""
-                    SELECT c.capacity, 
-                           (SELECT COUNT(*) FROM registration_courses WHERE course_id = :cid AND status = 'enrolled') as enrolled
-                    FROM courses c WHERE c.id = :cid
-                """, cid=course_id)
-                
-                if capacity_info:
-                    capacity = capacity_info[0][0]
-                    enrolled_count = capacity_info[0][1]
-                    
-                    # If there's now room, promote the first waitlisted person (by id order, which is chronological)
-                    if capacity is None or enrolled_count < capacity:
-                        # Find the first waitlisted entry for this course
-                        waitlist_entry = conn.run("""
-                            SELECT id FROM registration_courses 
-                            WHERE course_id = :cid AND status = 'waitlist'
-                            ORDER BY id ASC
-                            LIMIT 1
-                        """, cid=course_id)
-                        
-                        if waitlist_entry:
-                            # Promote this entry
-                            conn.run("""
-                                UPDATE registration_courses SET status = 'enrolled' 
-                                WHERE id = :rc_id
-                            """, rc_id=waitlist_entry[0][0])
-            
+
+            # Promote the first waitlisted entry for each freed course in a
+            # single query (was one SELECT + one UPDATE per course).
+            if course_ids:
+                conn.run("""
+                    WITH freed AS (
+                        SELECT id AS course_id, capacity FROM courses
+                        WHERE id = ANY(:cids)
+                    ),
+                    current_enrolled AS (
+                        SELECT course_id, COUNT(*) AS cnt
+                        FROM registration_courses
+                        WHERE course_id = ANY(:cids) AND status = 'enrolled'
+                        GROUP BY course_id
+                    ),
+                    candidates AS (
+                        SELECT DISTINCT ON (rc.course_id) rc.id
+                        FROM registration_courses rc
+                        JOIN freed f ON f.course_id = rc.course_id
+                        LEFT JOIN current_enrolled ce ON ce.course_id = rc.course_id
+                        WHERE rc.status = 'waitlist'
+                          AND (f.capacity IS NULL OR COALESCE(ce.cnt, 0) < f.capacity)
+                        ORDER BY rc.course_id, rc.id
+                    )
+                    UPDATE registration_courses
+                    SET status = 'enrolled'
+                    WHERE id IN (SELECT id FROM candidates)
+                """, cids=course_ids)
+
             conn.run("COMMIT")
         except Exception as e:
             conn.run("ROLLBACK")
@@ -594,20 +584,19 @@ class AdminService:
                 conn.run("UPDATE students SET birthday = :birthday WHERE id = :id",
                          birthday=data['birthday'], id=student_id)
             
-            # Update class if provided
+            # Update class if provided (atomic upsert-returning-id).
             class_id = None
             if 'class_name' in data:
                 class_name = data['class_name']
                 if class_name:
-                    # Try to find existing class
-                    class_res = conn.run("SELECT id FROM classes WHERE name = :name", name=class_name)
-                    if class_res:
-                        class_id = class_res[0][0]
-                    else:
-                        # Create new class
-                        class_res = conn.run("INSERT INTO classes (name) VALUES (:name) RETURNING id", name=class_name)
-                        class_id = class_res[0][0]
-                
+                    class_res = conn.run(
+                        """INSERT INTO classes (name) VALUES (:name)
+                           ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                           RETURNING id""",
+                        name=class_name,
+                    )
+                    class_id = class_res[0][0]
+
                 conn.run("UPDATE registrations SET class_name = :class_name, class_id = :class_id, updated_at = :now WHERE id = :id",
                          class_name=class_name, class_id=class_id, now=get_taiwan_time(), id=reg_id)
             
@@ -656,5 +645,73 @@ class AdminService:
         except Exception as e:
             conn.run("ROLLBACK")
             raise e
+        finally:
+            conn.close()
+
+
+class InquiryService:
+    """Parent inquiries + registration change log."""
+
+    @staticmethod
+    def submit(name, phone, question):
+        conn = get_db_connection()
+        try:
+            conn.run(
+                "INSERT INTO inquiries (name, phone, question) VALUES (:name, :phone, :question)",
+                name=name, phone=phone, question=question,
+            )
+            conn.run("COMMIT")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def list_all():
+        conn = get_db_connection()
+        try:
+            rows = conn.run("""
+                SELECT id, name, phone, question, is_read, created_at
+                FROM inquiries
+                ORDER BY created_at DESC
+            """)
+            return [{
+                'id': r[0], 'name': r[1], 'phone': r[2], 'question': r[3],
+                'is_read': r[4], 'created_at': tw_iso(r[5]),
+            } for r in rows]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def mark_read(inquiry_id):
+        conn = get_db_connection()
+        try:
+            conn.run("UPDATE inquiries SET is_read = TRUE WHERE id = :id", id=inquiry_id)
+            conn.run("COMMIT")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def delete(inquiry_id):
+        conn = get_db_connection()
+        try:
+            conn.run("DELETE FROM inquiries WHERE id = :id", id=inquiry_id)
+            conn.run("COMMIT")
+        finally:
+            conn.close()
+
+    @staticmethod
+    def list_registration_changes(limit=50):
+        conn = get_db_connection()
+        try:
+            rows = conn.run("""
+                SELECT id, registration_id, student_name, change_type, change_description, created_at
+                FROM registration_changes
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """, limit=limit)
+            return [{
+                'id': r[0], 'registration_id': r[1], 'student_name': r[2],
+                'change_type': r[3], 'change_description': r[4],
+                'created_at': tw_iso(r[5]),
+            } for r in rows]
         finally:
             conn.close()
