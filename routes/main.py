@@ -2,8 +2,7 @@
 from flask import Blueprint, request, jsonify
 
 from services.registration_service import RegistrationService
-from services.admin_service import AdminService
-from database import get_db_connection
+from services.admin_service import AdminService, InquiryService
 
 main_bp = Blueprint('main', __name__)
 
@@ -101,15 +100,7 @@ def submit_inquiry():
         if not question:
             return jsonify({'message': '請輸入您的問題'}), 400
 
-        conn = get_db_connection()
-        try:
-            conn.run(
-                "INSERT INTO inquiries (name, phone, question) VALUES (:name, :phone, :question)",
-                name=name, phone=phone, question=question
-            )
-            conn.run("COMMIT")
-            return jsonify({'message': '感謝您的提問，我們會儘快回覆您！'}), 200
-        finally:
-            conn.close()
+        InquiryService.submit(name, phone, question)
+        return jsonify({'message': '感謝您的提問，我們會儘快回覆您！'}), 200
     except Exception as e:
         return jsonify({'message': str(e)}), 500

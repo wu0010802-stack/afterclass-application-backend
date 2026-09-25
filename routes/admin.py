@@ -1,15 +1,13 @@
 
-from datetime import datetime as _datetime, timezone, timedelta
+from datetime import datetime as _datetime, timedelta
 from flask import Blueprint, request, jsonify
 import jwt
 
-from services.admin_service import AdminService
+from services.admin_service import AdminService, InquiryService
 from config import Config
-from database import get_db_connection
 
 admin_bp = Blueprint('admin', __name__)
 
-TW_TZ = timezone(timedelta(hours=8))
 
 def generate_token():
     now = _datetime.utcnow()
@@ -252,79 +250,30 @@ def get_async_routes():
 
 @admin_bp.route('/admin/inquiries', methods=['GET'])
 def get_inquiries():
-    """Get all parent inquiries"""
     try:
-        conn = get_db_connection()
-        try:
-            results = conn.run("""
-                SELECT id, name, phone, question, is_read, created_at
-                FROM inquiries
-                ORDER BY created_at DESC
-            """)
-            inquiries = [{
-                'id': row[0],
-                'name': row[1],
-                'phone': row[2],
-                'question': row[3],
-                'is_read': row[4],
-                'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None,
-            } for row in results]
-            return jsonify({'inquiries': inquiries})
-        finally:
-            conn.close()
+        return jsonify({'inquiries': InquiryService.list_all()})
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
 @admin_bp.route('/admin/inquiry/<int:inquiry_id>/read', methods=['PUT'])
 def mark_inquiry_read(inquiry_id):
-    """Mark inquiry as read"""
     try:
-        conn = get_db_connection()
-        try:
-            conn.run("UPDATE inquiries SET is_read = TRUE WHERE id = :id", id=inquiry_id)
-            conn.run("COMMIT")
-            return jsonify({'message': '已標記為已讀'})
-        finally:
-            conn.close()
+        InquiryService.mark_read(inquiry_id)
+        return jsonify({'message': '已標記為已讀'})
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
 @admin_bp.route('/admin/inquiry/<int:inquiry_id>', methods=['DELETE'])
 def delete_inquiry(inquiry_id):
-    """Delete an inquiry"""
     try:
-        conn = get_db_connection()
-        try:
-            conn.run("DELETE FROM inquiries WHERE id = :id", id=inquiry_id)
-            conn.run("COMMIT")
-            return jsonify({'message': '已刪除'})
-        finally:
-            conn.close()
+        InquiryService.delete(inquiry_id)
+        return jsonify({'message': '已刪除'})
     except Exception as e:
         return jsonify({'message': str(e)}), 500
 
 @admin_bp.route('/admin/registration-changes', methods=['GET'])
 def get_registration_changes():
-    """Get all registration change logs"""
     try:
-        conn = get_db_connection()
-        try:
-            results = conn.run("""
-                SELECT id, registration_id, student_name, change_type, change_description, created_at
-                FROM registration_changes
-                ORDER BY created_at DESC
-                LIMIT 50
-            """)
-            changes = [{
-                'id': row[0],
-                'registration_id': row[1],
-                'student_name': row[2],
-                'change_type': row[3],
-                'change_description': row[4],
-                'created_at': row[5].replace(tzinfo=timezone.utc).astimezone(TW_TZ).isoformat() if row[5] else None,
-            } for row in results]
-            return jsonify({'changes': changes})
-        finally:
-            conn.close()
+        return jsonify({'changes': InquiryService.list_registration_changes()})
     except Exception as e:
         return jsonify({'message': str(e)}), 500
